@@ -39,8 +39,6 @@ class MailImportAttachment extends IPSModule
             && $this->ReadPropertyString('AllowedSender') !== ''
             && $this->ReadPropertyString('TargetDirectory') !== '';
         $this->SetTimerInterval('PollTimer', $configured ? $interval * 1000 : 0);
-        // Den Symcon-Instanzstatus an den modul eigenen Aktivierungsschalter koppeln.
-        $this->SetStatus($this->ReadPropertyBoolean('Active') ? 102 : 104);
         $this->UpdateFormField('Status', 'caption', $this->ReadAttributeString('LastStatus'));
     }
 
