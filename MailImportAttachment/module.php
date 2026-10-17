@@ -39,6 +39,8 @@ class MailImportAttachment extends IPSModule
             && $this->ReadPropertyString('AllowedSender') !== ''
             && $this->ReadPropertyString('TargetDirectory') !== '';
         $this->SetTimerInterval('PollTimer', $configured ? $interval * 1000 : 0);
+        // Der Modulschalter steuert den IP-Symcon-Instanzstatus zusätzlich zum Polling.
+        $this->SetStatus($this->ReadPropertyBoolean('Active') ? 102 : 104);
         $this->UpdateFormField('Status', 'caption', $this->ReadAttributeString('LastStatus'));
     }
 
