@@ -1,0 +1,95 @@
+{
+  "elements": [
+    {
+      "type": "Label",
+      "caption": "IMAP-Verbindung"
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "Server",
+      "caption": "IMAP-Server"
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "Port",
+      "caption": "Port",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    {
+      "type": "Select",
+      "name": "Encryption",
+      "caption": "Verschlüsselung",
+      "options": [
+        {
+          "caption": "SSL/TLS",
+          "value": "ssl"
+        },
+        {
+          "caption": "STARTTLS",
+          "value": "tls"
+        },
+        {
+          "caption": "Keine (nicht empfohlen)",
+          "value": "none"
+        }
+      ]
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "Username",
+      "caption": "Benutzername"
+    },
+    {
+      "type": "PasswordTextBox",
+      "name": "Password",
+      "caption": "Passwort"
+    },
+    {
+      "type": "Label",
+      "caption": "Filter und Verarbeitung"
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "AllowedSender",
+      "caption": "Erlaubter Absender (E-Mail-Adresse)"
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "TargetDirectory",
+      "caption": "Zielverzeichnis für Anhänge"
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "ScriptID",
+      "caption": "Skript-ID nach Import",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "PollInterval",
+      "caption": "Prüfintervall (Sekunden)",
+      "minimum": 30,
+      "maximum": 86400
+    },
+    {
+      "type": "CheckBox",
+      "name": "MarkSeen",
+      "caption": "Erfolgreich verarbeitete E-Mails als gelesen markieren"
+    },
+    {
+      "type": "Label",
+      "name": "Status",
+      "caption": "Noch kein Abruf durchgeführt."
+    }
+  ],
+  "actions": [
+    {
+      "type": "Button",
+      "caption": "Jetzt prüfen",
+      "onClick": "MIA_CheckNow"
+    }
+  ],
+  "status": []
+}
