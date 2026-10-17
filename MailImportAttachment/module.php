@@ -14,11 +14,18 @@ class MailImportAttachment extends IPSModule
         $this->RegisterPropertyString('Username', '');
         $this->RegisterPropertyString('Password', '');
         $this->RegisterPropertyString('AllowedSender', '');
+        $this->RegisterPropertyString('SubjectContains', '');
         $this->RegisterPropertyString('TargetDirectory', '');
         $this->RegisterPropertyInteger('ScriptID', 0);
         $this->RegisterPropertyInteger('PollInterval', 60);
         $this->RegisterPropertyBoolean('MarkSeen', true);
         $this->RegisterAttributeString('LastStatus', 'Noch kein Abruf durchgeführt.');
+        $this->RegisterVariableString('Status', 'Status', '', 10);
+        $this->RegisterVariableString('LastCheck', 'Letzter Abruf', '', 20);
+        $this->RegisterVariableInteger('ProcessedCount', 'Verarbeitete E-Mails', '', 30);
+        $this->RegisterVariableInteger('SavedCount', 'Gespeicherte Dateien', '', 40);
+        $this->RegisterVariableInteger('ErrorCount', 'Fehler', '', 50);
+        $this->EnableAction('Status');
         $this->RegisterTimer('PollTimer', 0, 'MIA_CheckNow($_IPS[\'TARGET\']);');
     }
 
@@ -48,6 +55,7 @@ class MailImportAttachment extends IPSModule
         $username = trim($this->ReadPropertyString('Username'));
         $password = $this->ReadPropertyString('Password');
         $allowedSender = strtolower(trim($this->ReadPropertyString('AllowedSender')));
+        $subjectContains = trim($this->ReadPropertyString('SubjectContains'));
         $directory = $this->ResolveTargetDirectory(trim($this->ReadPropertyString('TargetDirectory')));
         $scriptID = $this->ReadPropertyInteger('ScriptID');
 
@@ -71,6 +79,7 @@ class MailImportAttachment extends IPSModule
         $processed = 0;
         $savedCount = 0;
         $errors = 0;
+        $this->SetStatusText('Verbinde mit dem IMAP-Server …');
         try {
             $this->ConnectImap($server, $this->ReadPropertyInteger('Port'), $this->ReadPropertyString('Encryption'));
             $this->ImapCommand('LOGIN ' . $this->QuoteImap($username) . ' ' . $this->QuoteImap($password));
@@ -93,10 +102,16 @@ class MailImportAttachment extends IPSModule
 
                 $message = $this->ParseMimeMessage($rawMessage);
                 $from = $this->ExtractSender($message['headers']['from'] ?? '');
+                $subject = $this->DecodeMimeText($message['headers']['subject'] ?? '');
                 if ($from === '' || strtolower($from) !== $allowedSender) {
                     $this->SendDebug('Absender ignoriert', $from, 0);
                     continue;
                 }
+                if ($subjectContains !== '' && stripos($subject, $subjectContains) === false) {
+                    $this->SendDebug('Betreff ignoriert', 'UID ' . $uid . ', Betreff: ' . $subject, 0);
+                    continue;
+                }
+                $this->SetStatusText('Prüfe E-Mail UID ' . $uid . ' (Betreff: ' . ($subject !== '' ? $subject : '(ohne Betreff)') . ') …');
                 if (empty($message['attachments'])) {
                     $this->SendDebug('Keine Anhänge', 'UID ' . $uid, 0);
                     continue;
@@ -120,6 +135,7 @@ class MailImportAttachment extends IPSModule
                 }
 
                 if ($scriptID > 0) {
+                    $this->SetStatusText('Rufe Skript ' . $scriptID . ' für E-Mail UID ' . $uid . ' auf …');
                     IPS_RunScript($scriptID);
                 }
                 if ($this->ReadPropertyBoolean('MarkSeen')) {
@@ -131,14 +147,16 @@ class MailImportAttachment extends IPSModule
         } catch (Throwable $e) {
             $errors++;
             $this->SendDebug('Ausnahme', $e->getMessage(), 0);
+            $this->UpdateRunCounters($processed, $savedCount, $errors, true);
             $this->SetStatusText('Fehler: ' . $e->getMessage());
             return;
         } finally {
             $this->DisconnectImap();
         }
 
-        $this->SetStatusText(date('d.m.Y H:i:s') . ' – verarbeitet: ' . $processed .
-            ', Dateien gespeichert: ' . $savedCount . ', Fehler: ' . $errors . '.');
+        $this->UpdateRunCounters($processed, $savedCount, $errors, true);
+        $this->SetStatusText(date('d.m.Y H:i:s') . ' – abgeschlossen: ' . $processed .
+            ' E-Mails verarbeitet, ' . $savedCount . ' Dateien gespeichert, ' . $errors . ' Fehler.');
     }
 
     private function ConnectImap(string $server, int $port, string $encryption): void
@@ -387,9 +405,20 @@ class MailImportAttachment extends IPSModule
         return $candidate;
     }
 
+    private function UpdateRunCounters(int $processed, int $savedCount, int $errors, bool $setTime): void
+    {
+        $this->SetValue('ProcessedCount', $processed);
+        $this->SetValue('SavedCount', $savedCount);
+        $this->SetValue('ErrorCount', $errors);
+        if ($setTime) {
+            $this->SetValue('LastCheck', date('d.m.Y H:i:s'));
+        }
+    }
+
     private function SetStatusText(string $status): void
     {
         $this->WriteAttributeString('LastStatus', $status);
+        $this->SetValue('Status', $status);
         $this->UpdateFormField('Status', 'caption', $status);
         $this->SendDebug('Status', $status, 0);
     }
