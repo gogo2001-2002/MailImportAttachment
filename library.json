@@ -1,0 +1,12 @@
+{
+  "id": "{A61B7F44-4B79-4D7D-9A4D-5C36D8E1A901}",
+  "name": "MailImportAttachment",
+  "author": "gogo2001-2002",
+  "url": "https://github.com/gogo2001-2002/MailImportAttachment",
+  "compatibility": {
+    "version": "9.0"
+  },
+  "version": "1.0",
+  "build": 1,
+  "date": 20261017
+}
