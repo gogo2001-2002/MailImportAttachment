@@ -1,30 +1,36 @@
 # MailImportAttachment
 
-IP-Symcon-Modul zum regelmäßigen Abrufen eines IMAP-Postfachs. Es verarbeitet ungelesene E-Mails des konfigurierten Absenders, speichert Anhänge in einem Zielverzeichnis und ruft nach erfolgreichem Speichern aller Anhänge das konfigurierte IP-Symcon-Skript auf.
+IP-Symcon-Modul zum regelmäßigen Abrufen eines IMAP-Postfachs. Es verarbeitet ungelesene E-Mails des konfigurierten Absenders und optional eines Betreff-Teils, speichert Anhänge in einem Zielverzeichnis und ruft nach erfolgreichem Speichern das ausgewählte IP-Symcon-Skript auf.
 
 ## Voraussetzungen
 - IP-Symcon 9
 - Netzwerkzugriff vom Symcon-Container auf den IMAP-Server
 - Der Symcon-Dienst benötigt Schreibrechte auf das Zielverzeichnis
-- Für die MIME-Kopfzeilen-Dekodierung wird nach Möglichkeit die PHP-Funktion `iconv_mime_decode` verwendet; sie ist nicht Voraussetzung für den IMAP-Zugriff
+- Die PHP-IMAP-Erweiterung ist nicht erforderlich; das Modul nutzt PHP-Sockets
 
-**Die PHP-IMAP-Erweiterung ist nicht erforderlich.** Das Modul spricht IMAP direkt über PHP-Sockets und nutzt TLS bei entsprechender Konfiguration.
+## Konfiguration
+- IMAP-Server, Port und Verschlüsselung (SSL/TLS, STARTTLS oder unverschlüsselt)
+- Benutzername und Passwort
+- Exakte erlaubte Absenderadresse
+- Optionaler Betreff-Filter: Es genügt ein Teil des Betreffs; der Vergleich ist nicht groß-/kleinschreibungssensitiv
+- Zielverzeichnis; relative Pfade werden relativ zum IP-Symcon-Kernelverzeichnis aufgelöst
+- Optionales Folgeskript, auswählbar über den Symcon-Skriptauswahldialog
+- Prüfintervall und optionales Markieren erfolgreich verarbeiteter Nachrichten als gelesen
 
-## Installation
-1. Repository als Modul-Repository in IP-Symcon einbinden oder den Ordner `MailImportAttachment` in die Modulbibliothek kopieren.
-2. Modulverwaltung aktualisieren und eine Instanz **MailImportAttachment** anlegen.
-3. IMAP-Server, Port, Verschlüsselung, Zugangsdaten, erlaubten Absender, Zielverzeichnis und Skript-ID eintragen.
-4. Mit **Jetzt prüfen** einen manuellen Abruf auslösen und das Symcon-Log kontrollieren.
+## Statusvariablen
+Unterhalb der Modulinstanz werden folgende Variablen angelegt:
+- **Status**: aktueller Verarbeitungsschritt bzw. Ergebnis
+- **Letzter Abruf**: Zeitpunkt des letzten abgeschlossenen oder fehlgeschlagenen Abrufs
+- **Verarbeitete E-Mails**: Anzahl erfolgreich verarbeiteter E-Mails beim letzten Durchlauf
+- **Gespeicherte Dateien**: Anzahl gespeicherter Anhänge beim letzten Durchlauf
+- **Fehler**: Anzahl erkannter Fehler beim letzten Durchlauf
 
 ## Verarbeitung
-- Es werden ungelesene Nachrichten gesucht.
-- Die Absenderadresse wird exakt mit der konfigurierten Adresse verglichen.
+- Es werden ungelesene Nachrichten in INBOX gesucht.
+- Absender und optionaler Betreff-Teil werden geprüft.
 - Anhänge werden aus MIME-Nachrichten dekodiert und gespeichert.
 - Bei Dateinamenskollisionen werden Zeitstempel und bei Bedarf laufende Nummern ergänzt.
 - Nach erfolgreichem Speichern aller Anhänge wird das ausgewählte Skript einmal pro E-Mail aufgerufen.
-- Erfolgreich verarbeitete Nachrichten können als gelesen markiert werden.
-- E-Mails ohne Anhänge werden nicht als erfolgreich importiert markiert und lösen keinen Skriptaufruf aus.
-- Relative Zielpfade werden relativ zum IP-Symcon-Kernelverzeichnis aufgelöst.
+- E-Mails ohne Anhänge lösen keinen Skriptaufruf aus.
 
-## Sicherheit und Hinweise
-Verwende nach Möglichkeit SSL/TLS oder STARTTLS. Das Zielverzeichnis muss für den Symcon-Dienst beschreibbar sein. Vor produktivem Einsatz ist ein Test mit dem konkreten Mailserver empfohlen. Die aktuelle Implementierung verarbeitet das Postfach INBOX und sucht dort nach ungelesenen Nachrichten.
+Vor produktivem Einsatz wird ein Test mit dem konkreten Mailserver empfohlen.
