@@ -31,9 +31,16 @@ class MailImportAttachment extends IPSModule
         $this->UpdateFormField('Status', 'caption', $this->ReadAttributeString('LastStatus'));
     }
 
-    public function MIA_CheckNow()
+
+    public function RequestAction($Ident, $Value)
     {
-        $this->CheckNow();
+        switch ($Ident) {
+            case 'MIA_CheckNow':
+                $this->CheckNow();
+                break;
+            default:
+                throw new Exception('Invalid Ident');
+        }
     }
 
     public function CheckNow()
