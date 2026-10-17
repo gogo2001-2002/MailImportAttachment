@@ -8,6 +8,7 @@ class MailImportAttachment extends IPSModule
     public function Create()
     {
         parent::Create();
+        $this->RegisterPropertyBoolean('Active', false);
         $this->RegisterPropertyString('Server', '');
         $this->RegisterPropertyInteger('Port', 993);
         $this->RegisterPropertyString('Encryption', 'ssl');
@@ -32,7 +33,8 @@ class MailImportAttachment extends IPSModule
     {
         parent::ApplyChanges();
         $interval = max(30, $this->ReadPropertyInteger('PollInterval'));
-        $configured = $this->ReadPropertyString('Server') !== ''
+        $configured = $this->ReadPropertyBoolean('Active')
+            && $this->ReadPropertyString('Server') !== ''
             && $this->ReadPropertyString('Username') !== ''
             && $this->ReadPropertyString('AllowedSender') !== ''
             && $this->ReadPropertyString('TargetDirectory') !== '';
@@ -50,6 +52,11 @@ class MailImportAttachment extends IPSModule
 
     public function CheckNow()
     {
+        if (!$this->ReadPropertyBoolean('Active')) {
+            $this->SetStatusText('Modul ist deaktiviert. Es werden keine E-Mails abgerufen oder verarbeitet.');
+            return;
+        }
+
         $server = trim($this->ReadPropertyString('Server'));
         $username = trim($this->ReadPropertyString('Username'));
         $password = $this->ReadPropertyString('Password');
