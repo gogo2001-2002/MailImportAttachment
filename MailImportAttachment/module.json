@@ -1,0 +1,14 @@
+{
+  "id": "{A61B7F44-4B79-4D7D-9A4D-5C36D8E1A901}",
+  "name": "MailImportAttachment",
+  "type": 3,
+  "vendor": "gogo2001-2002",
+  "aliases": [
+    "Mail Import Attachment",
+    "IMAP Attachment Import"
+  ],
+  "parentRequirements": [],
+  "childRequirements": [],
+  "implemented": [],
+  "prefix": "MIA"
+}
