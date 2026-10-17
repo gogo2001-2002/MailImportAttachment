@@ -1,6 +1,11 @@
 {
   "elements": [
     {
+      "type": "CheckBox",
+      "name": "Active",
+      "caption": "Aktiv – E-Mails automatisch abrufen und verarbeiten"
+    },
+    {
       "type": "Label",
       "caption": "IMAP-Verbindung"
     },
@@ -21,9 +26,18 @@
       "name": "Encryption",
       "caption": "Verschlüsselung",
       "options": [
-        { "caption": "SSL/TLS", "value": "ssl" },
-        { "caption": "STARTTLS", "value": "tls" },
-        { "caption": "Keine (nicht empfohlen)", "value": "none" }
+        {
+          "caption": "SSL/TLS",
+          "value": "ssl"
+        },
+        {
+          "caption": "STARTTLS",
+          "value": "tls"
+        },
+        {
+          "caption": "Keine (nicht empfohlen)",
+          "value": "none"
+        }
       ]
     },
     {
@@ -80,6 +94,26 @@
       "type": "Label",
       "name": "Status",
       "caption": "Noch kein Abruf durchgeführt."
+    },
+    {
+      "type": "Label",
+      "caption": "Version: 1.1 (Build 2)"
+    },
+    {
+      "type": "Label",
+      "caption": "Modulbeschreibung"
+    },
+    {
+      "type": "Label",
+      "caption": "MailImportAttachment ruft in einem konfigurierbaren Intervall ungelesene E-Mails über IMAP ab. Nur E-Mails des erlaubten Absenders und – falls eingetragen – mit dem angegebenen Text im Betreff werden verarbeitet. Anhänge werden im Zielverzeichnis mit eindeutigen Dateinamen gespeichert. Nach erfolgreichem Import kann ein ausgewähltes IP-Symcon-Skript gestartet werden."
+    },
+    {
+      "type": "Label",
+      "caption": "Parameterbeschreibung"
+    },
+    {
+      "type": "Label",
+      "caption": "Aktiv: Schaltet Abruf und Verarbeitung ein oder aus. IMAP-Server, Port und Verschlüsselung: Zugang zum Mailserver. Benutzername und Passwort: Postfach-Anmeldung. Erlaubter Absender: exakt zulässige E-Mail-Adresse. Betreff-Filter: optionaler Text, der im Betreff enthalten sein muss. Zielverzeichnis: Speicherort für Anhänge; relative Pfade beziehen sich auf das Kernelverzeichnis. Folgeskript: optionales Skript nach erfolgreichem Import. Prüfintervall: Abstand zwischen Abrufen in Sekunden. Als gelesen markieren: markiert erfolgreich verarbeitete E-Mails als gelesen."
     }
   ],
   "actions": [
