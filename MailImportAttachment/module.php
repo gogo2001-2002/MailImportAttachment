@@ -25,7 +25,7 @@ class MailImportAttachment extends IPSModule
         $this->RegisterVariableInteger('ProcessedCount', 'Verarbeitete E-Mails', '', 30);
         $this->RegisterVariableInteger('SavedCount', 'Gespeicherte Dateien', '', 40);
         $this->RegisterVariableInteger('ErrorCount', 'Fehler', '', 50);
-        $this->RegisterTimer('PollTimer', 0, 'MIA_CheckNow($_IPS[\'TARGET\']);');
+        $this->RegisterTimer('PollTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'MIA_CheckNow\', true);');
     }
 
     public function ApplyChanges()
