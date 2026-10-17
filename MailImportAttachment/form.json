@@ -21,18 +21,9 @@
       "name": "Encryption",
       "caption": "Verschlüsselung",
       "options": [
-        {
-          "caption": "SSL/TLS",
-          "value": "ssl"
-        },
-        {
-          "caption": "STARTTLS",
-          "value": "tls"
-        },
-        {
-          "caption": "Keine (nicht empfohlen)",
-          "value": "none"
-        }
+        { "caption": "SSL/TLS", "value": "ssl" },
+        { "caption": "STARTTLS", "value": "tls" },
+        { "caption": "Keine (nicht empfohlen)", "value": "none" }
       ]
     },
     {
@@ -56,15 +47,18 @@
     },
     {
       "type": "ValidationTextBox",
+      "name": "SubjectContains",
+      "caption": "Betreff muss diesen Text enthalten (optional)"
+    },
+    {
+      "type": "ValidationTextBox",
       "name": "TargetDirectory",
       "caption": "Zielverzeichnis für Anhänge"
     },
     {
-      "type": "NumberSpinner",
+      "type": "SelectScript",
       "name": "ScriptID",
-      "caption": "Skript-ID nach Import",
-      "minimum": 0,
-      "maximum": 2147483647
+      "caption": "Skript nach erfolgreichem Import (optional)"
     },
     {
       "type": "NumberSpinner",
@@ -77,6 +71,10 @@
       "type": "CheckBox",
       "name": "MarkSeen",
       "caption": "Erfolgreich verarbeitete E-Mails als gelesen markieren"
+    },
+    {
+      "type": "Label",
+      "caption": "Aktueller Status"
     },
     {
       "type": "Label",
