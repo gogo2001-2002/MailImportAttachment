@@ -42,7 +42,7 @@ class MailImportAttachment extends IPSModule
         $username = trim($this->ReadPropertyString('Username'));
         $password = $this->ReadPropertyString('Password');
         $allowedSender = strtolower(trim($this->ReadPropertyString('AllowedSender')));
-        $directory = rtrim(trim($this->ReadPropertyString('TargetDirectory')), DIRECTORY_SEPARATOR);
+        $directory = $this->ResolveTargetDirectory(trim($this->ReadPropertyString('TargetDirectory')));
         $scriptID = $this->ReadPropertyInteger('ScriptID');
 
         if ($server === '' || $username === '' || $allowedSender === '' || $directory === '') {
@@ -144,6 +144,31 @@ class MailImportAttachment extends IPSModule
 
         $this->SetStatusText(date('d.m.Y H:i:s') . ' – verarbeitet: ' . $processed .
             ', Dateien gespeichert: ' . $savedCount . ', Fehler: ' . $errors . '.');
+    }
+
+
+    /**
+     * Relative Zielpfade werden relativ zum IP-Symcon-Kernel-/Datenverzeichnis aufgelöst.
+     * Absolute Pfade bleiben unverändert.
+     */
+    private function ResolveTargetDirectory(string $directory): string
+    {
+        $directory = trim($directory);
+        if ($directory === '') {
+            return '';
+        }
+
+        // Unix absolute paths and Windows drive/UNC paths are treated as absolute.
+        $isAbsolute = str_starts_with($directory, '/')
+            || preg_match('/^[A-Za-z]:[\\\\\\/]/', $directory) === 1
+            || str_starts_with($directory, '\\\\\\\\');
+
+        if (!$isAbsolute) {
+            $kernelDirectory = rtrim(IPS_GetKernelDir(), DIRECTORY_SEPARATOR);
+            $directory = $kernelDirectory . DIRECTORY_SEPARATOR . ltrim($directory, '/\\\\');
+        }
+
+        return rtrim($directory, DIRECTORY_SEPARATOR);
     }
 
     private function CollectAttachments($connection, int $uid, object $part, string $partNumber, array &$attachments): void
