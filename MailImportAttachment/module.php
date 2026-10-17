@@ -2,6 +2,9 @@
 
 class MailImportAttachment extends IPSModule
 {
+    private $imapSocket = null;
+    private int $imapTag = 0;
+
     public function Create()
     {
         parent::Create();
@@ -11,12 +14,18 @@ class MailImportAttachment extends IPSModule
         $this->RegisterPropertyString('Username', '');
         $this->RegisterPropertyString('Password', '');
         $this->RegisterPropertyString('AllowedSender', '');
+        $this->RegisterPropertyString('SubjectContains', '');
         $this->RegisterPropertyString('TargetDirectory', '');
         $this->RegisterPropertyInteger('ScriptID', 0);
         $this->RegisterPropertyInteger('PollInterval', 60);
         $this->RegisterPropertyBoolean('MarkSeen', true);
         $this->RegisterAttributeString('LastStatus', 'Noch kein Abruf durchgeführt.');
-        $this->RegisterTimer('PollTimer', 0, 'MIA_CheckNow($_IPS[\'TARGET\']);');
+        $this->RegisterVariableString('Status', 'Status', '', 10);
+        $this->RegisterVariableString('LastCheck', 'Letzter Abruf', '', 20);
+        $this->RegisterVariableInteger('ProcessedCount', 'Verarbeitete E-Mails', '', 30);
+        $this->RegisterVariableInteger('SavedCount', 'Gespeicherte Dateien', '', 40);
+        $this->RegisterVariableInteger('ErrorCount', 'Fehler', '', 50);
+        $this->RegisterTimer('PollTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'MIA_CheckNow\', true);');
     }
 
     public function ApplyChanges()
@@ -31,8 +40,11 @@ class MailImportAttachment extends IPSModule
         $this->UpdateFormField('Status', 'caption', $this->ReadAttributeString('LastStatus'));
     }
 
-    public function MIA_CheckNow()
+    public function RequestAction($Ident, $Value)
     {
+        if ($Ident !== 'MIA_CheckNow') {
+            throw new Exception('Invalid Ident');
+        }
         $this->CheckNow();
     }
 
@@ -42,15 +54,16 @@ class MailImportAttachment extends IPSModule
         $username = trim($this->ReadPropertyString('Username'));
         $password = $this->ReadPropertyString('Password');
         $allowedSender = strtolower(trim($this->ReadPropertyString('AllowedSender')));
-        $directory = rtrim(trim($this->ReadPropertyString('TargetDirectory')), DIRECTORY_SEPARATOR);
+        $subjectContains = trim($this->ReadPropertyString('SubjectContains'));
+        $directory = $this->ResolveTargetDirectory(trim($this->ReadPropertyString('TargetDirectory')));
         $scriptID = $this->ReadPropertyInteger('ScriptID');
 
         if ($server === '' || $username === '' || $allowedSender === '' || $directory === '') {
             $this->SetStatusText('Bitte IMAP-Server, Benutzername, erlaubten Absender und Zielverzeichnis konfigurieren.');
             return;
         }
-        if (!function_exists('imap_open')) {
-            $this->SetStatusText('Fehler: Die PHP-IMAP-Erweiterung ist nicht verfügbar.');
+        if ($scriptID > 0 && !IPS_ScriptExists($scriptID)) {
+            $this->SetStatusText('Fehler: Die konfigurierte Skript-ID existiert nicht: ' . $scriptID);
             return;
         }
         if (!is_dir($directory) && !@mkdir($directory, 0775, true)) {
@@ -62,52 +75,51 @@ class MailImportAttachment extends IPSModule
             return;
         }
 
-        $port = $this->ReadPropertyInteger('Port');
-        $encryption = $this->ReadPropertyString('Encryption');
-        $mailbox = '{' . $server . ':' . $port . '/imap/' .
-            ($encryption === 'ssl' ? 'ssl' : ($encryption === 'tls' ? 'tls' : 'notls')) . '}INBOX';
-
-        $connection = @imap_open($mailbox, $username, $password, 0, 1);
-        if (!$connection) {
-            $this->SetStatusText('IMAP-Verbindung fehlgeschlagen: ' . (imap_last_error() ?: 'Unbekannter Fehler'));
-            return;
-        }
-
         $processed = 0;
         $savedCount = 0;
         $errors = 0;
+        $this->SetStatusText('Verbinde mit dem IMAP-Server …');
         try {
-            $uids = @imap_search($connection, 'UNSEEN', SE_UID);
-            if (!is_array($uids)) {
-                $uids = [];
-            }
+            $this->ConnectImap($server, $this->ReadPropertyInteger('Port'), $this->ReadPropertyString('Encryption'));
+            $this->ImapCommand('LOGIN ' . $this->QuoteImap($username) . ' ' . $this->QuoteImap($password));
+            $this->ImapCommand('SELECT INBOX');
+            $search = $this->ImapCommand('UID SEARCH UNSEEN');
+            preg_match('/\* SEARCH([^\r\n]*)/i', $search, $searchMatch);
+            $uids = isset($searchMatch[1]) ? preg_split('/\s+/', trim($searchMatch[1]), -1, PREG_SPLIT_NO_EMPTY) : [];
+
             foreach ($uids as $uid) {
-                $overview = @imap_fetch_overview($connection, (string)$uid, FT_UID);
-                if (!$overview || !isset($overview[0])) {
+                if (!ctype_digit($uid)) {
                     continue;
                 }
-                $from = $this->ExtractSender((string)($overview[0]->from ?? ''));
+                $fetch = $this->ImapCommand('UID FETCH ' . $uid . ' (BODY.PEEK[])');
+                $rawMessage = $this->ExtractLiteral($fetch);
+                if ($rawMessage === null) {
+                    $errors++;
+                    $this->SendDebug('IMAP', 'Keine Nachrichten-Literal-Daten für UID ' . $uid, 0);
+                    continue;
+                }
+
+                $message = $this->ParseMimeMessage($rawMessage);
+                $from = $this->ExtractSender($message['headers']['from'] ?? '');
+                $subject = $this->DecodeMimeText($message['headers']['subject'] ?? '');
                 if ($from === '' || strtolower($from) !== $allowedSender) {
                     $this->SendDebug('Absender ignoriert', $from, 0);
                     continue;
                 }
-
-                $structure = @imap_fetchstructure($connection, (int)$uid, FT_UID);
-                if (!$structure) {
-                    $errors++;
+                if ($subjectContains !== '' && stripos($subject, $subjectContains) === false) {
+                    $this->SendDebug('Betreff ignoriert', 'UID ' . $uid . ', Betreff: ' . $subject, 0);
                     continue;
                 }
-                $attachments = [];
-                $this->CollectAttachments($connection, (int)$uid, $structure, '', $attachments);
-                if (!$attachments) {
+                $this->SetStatusText('Prüfe E-Mail UID ' . $uid . ' (Betreff: ' . ($subject !== '' ? $subject : '(ohne Betreff)') . ') …');
+                if (empty($message['attachments'])) {
+                    $this->SendDebug('Keine Anhänge', 'UID ' . $uid, 0);
                     continue;
                 }
 
                 $paths = [];
                 $messageOk = true;
-                foreach ($attachments as $attachment) {
-                    $filename = $this->SafeFilename($attachment['name']);
-                    $path = $this->UniquePath($directory, $filename);
+                foreach ($message['attachments'] as $attachment) {
+                    $path = $this->UniquePath($directory, $this->SafeFilename($attachment['name']));
                     if (@file_put_contents($path, $attachment['data'], LOCK_EX) === false) {
                         $messageOk = false;
                         $this->SendDebug('Dateifehler', 'Konnte nicht schreiben: ' . $path, 0);
@@ -122,15 +134,11 @@ class MailImportAttachment extends IPSModule
                 }
 
                 if ($scriptID > 0) {
-                    if (!IPS_ScriptExists($scriptID)) {
-                        $this->SendDebug('Skriptfehler', 'Skript-ID existiert nicht: ' . $scriptID, 0);
-                        $errors++;
-                        continue;
-                    }
+                    $this->SetStatusText('Rufe Skript ' . $scriptID . ' für E-Mail UID ' . $uid . ' auf …');
                     IPS_RunScript($scriptID);
                 }
                 if ($this->ReadPropertyBoolean('MarkSeen')) {
-                    @imap_setflag_full($connection, (string)$uid, '\\Seen', ST_UID);
+                    $this->ImapCommand('UID STORE ' . $uid . ' +FLAGS.SILENT (\\Seen)');
                 }
                 $processed++;
                 $this->SendDebug('Import erfolgreich', 'UID ' . $uid . ': ' . implode(', ', $paths), 0);
@@ -138,53 +146,202 @@ class MailImportAttachment extends IPSModule
         } catch (Throwable $e) {
             $errors++;
             $this->SendDebug('Ausnahme', $e->getMessage(), 0);
+            $this->UpdateRunCounters($processed, $savedCount, $errors, true);
+            $this->SetStatusText('Fehler: ' . $e->getMessage());
+            return;
         } finally {
-            @imap_close($connection);
+            $this->DisconnectImap();
         }
 
-        $this->SetStatusText(date('d.m.Y H:i:s') . ' – verarbeitet: ' . $processed .
-            ', Dateien gespeichert: ' . $savedCount . ', Fehler: ' . $errors . '.');
+        $this->UpdateRunCounters($processed, $savedCount, $errors, true);
+        $this->SetStatusText(date('d.m.Y H:i:s') . ' – abgeschlossen: ' . $processed .
+            ' E-Mails verarbeitet, ' . $savedCount . ' Dateien gespeichert, ' . $errors . ' Fehler.');
     }
 
-    private function CollectAttachments($connection, int $uid, object $part, string $partNumber, array &$attachments): void
+    private function ConnectImap(string $server, int $port, string $encryption): void
     {
-        $name = '';
-        if (!empty($part->ifdparameters) && is_array($part->dparameters)) {
-            foreach ($part->dparameters as $parameter) {
-                if (strtolower((string)$parameter->attribute) === 'filename') {
-                    $name = (string)$parameter->value;
-                }
+        $timeout = 20;
+        $host = ($encryption === 'ssl' ? 'ssl://' : '') . $server;
+        $errno = 0;
+        $error = '';
+        $this->imapSocket = @stream_socket_client($host . ':' . $port, $errno, $error, $timeout, STREAM_CLIENT_CONNECT);
+        if (!is_resource($this->imapSocket)) {
+            throw new Exception('IMAP-Verbindung fehlgeschlagen (' . $errno . '): ' . $error);
+        }
+        stream_set_timeout($this->imapSocket, $timeout);
+        $greeting = fgets($this->imapSocket);
+        if ($greeting === false || stripos($greeting, '* OK') !== 0) {
+            throw new Exception('Ungültige IMAP-Begrüßung: ' . trim((string)$greeting));
+        }
+        if ($encryption === 'tls') {
+            $this->ImapCommand('STARTTLS');
+            $crypto = @stream_socket_enable_crypto($this->imapSocket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+            if ($crypto !== true) {
+                throw new Exception('STARTTLS konnte nicht aktiviert werden.');
             }
         }
-        if ($name === '' && !empty($part->ifparameters) && is_array($part->parameters)) {
-            foreach ($part->parameters as $parameter) {
-                if (strtolower((string)$parameter->attribute) === 'name') {
-                    $name = (string)$parameter->value;
-                }
-            }
-        }
+    }
 
-        if ($name !== '') {
-            $section = $partNumber === '' ? '1' : $partNumber;
-            $body = @imap_fetchbody($connection, (string)$uid, $section, FT_UID);
-            if ($body !== false) {
-                if ((int)$part->encoding === 3) {
-                    $decoded = base64_decode($body, true);
-                    $body = $decoded === false ? '' : $decoded;
-                } elseif ((int)$part->encoding === 4) {
-                    $body = quoted_printable_decode($body);
+    private function DisconnectImap(): void
+    {
+        if (is_resource($this->imapSocket)) {
+            try {
+                $this->ImapCommand('LOGOUT');
+            } catch (Throwable $e) {
+                // Verbindung wird anschließend geschlossen.
+            }
+            fclose($this->imapSocket);
+        }
+        $this->imapSocket = null;
+    }
+
+    private function ImapCommand(string $command): string
+    {
+        if (!is_resource($this->imapSocket)) {
+            throw new Exception('Keine IMAP-Verbindung vorhanden.');
+        }
+        $tag = 'MIA' . str_pad((string)++$this->imapTag, 4, '0', STR_PAD_LEFT);
+        if (fwrite($this->imapSocket, $tag . ' ' . $command . "\r\n") === false) {
+            throw new Exception('IMAP-Befehl konnte nicht gesendet werden.');
+        }
+        $response = '';
+        $taggedDone = false;
+        while (!feof($this->imapSocket)) {
+            $line = fgets($this->imapSocket);
+            if ($line === false) {
+                break;
+            }
+            $response .= $line;
+            if (preg_match('/\{(\d+)\}\r?\n$/', $line, $literalMatch)) {
+                $length = (int)$literalMatch[1];
+                $remaining = $length;
+                while ($remaining > 0) {
+                    $chunk = fread($this->imapSocket, min(8192, $remaining));
+                    if ($chunk === false || $chunk === '') {
+                        throw new Exception('IMAP-Literal unvollständig gelesen.');
+                    }
+                    $response .= $chunk;
+                    $remaining -= strlen($chunk);
                 }
-                $attachments[] = ['name' => $this->DecodeMimeText($name), 'data' => $body];
+                continue;
+            }
+            if (preg_match('/^' . preg_quote($tag, '/') . ' (OK|NO|BAD)\b/i', $line, $statusMatch)) {
+                $taggedDone = true;
+                if (strtoupper($statusMatch[1]) !== 'OK') {
+                    throw new Exception('IMAP-Befehl fehlgeschlagen: ' . trim($line));
+                }
+                break;
+            }
+        }
+        if (!$taggedDone) {
+            throw new Exception('Keine vollständige Antwort auf IMAP-Befehl ' . $tag . '.');
+        }
+        return $response;
+    }
+
+    private function QuoteImap(string $value): string
+    {
+        return '"' . str_replace(["\\", '"', "\r", "\n"], ["\\\\", '\\"', '', ''], $value) . '"';
+    }
+
+    private function ExtractLiteral(string $response): ?string
+    {
+        if (!preg_match('/\{(\d+)\}\r?\n/', $response, $matches, PREG_OFFSET_CAPTURE)) {
+            return null;
+        }
+        $length = (int)$matches[1][0];
+        $start = $matches[0][1] + strlen($matches[0][0]);
+        if (strlen($response) - $start < $length) {
+            return null;
+        }
+        return substr($response, $start, $length);
+    }
+
+    private function ParseMimeMessage(string $raw): array
+    {
+        $parts = preg_split("/\r?\n\r?\n/", $raw, 2);
+        $headerText = $parts[0] ?? '';
+        $body = $parts[1] ?? '';
+        $headers = [];
+        $unfolded = preg_replace("/\r?\n[ \t]+/", ' ', $headerText);
+        foreach (preg_split("/\r?\n/", (string)$unfolded) as $line) {
+            $colon = strpos($line, ':');
+            if ($colon !== false) {
+                $key = strtolower(trim(substr($line, 0, $colon)));
+                $headers[$key] = trim(substr($line, $colon + 1));
+            }
+        }
+        $attachments = [];
+        $this->ParseMimePart($headers, $body, $attachments, false);
+        return ['headers' => $headers, 'attachments' => $attachments];
+    }
+
+    private function ParseMimePart(array $headers, string $body, array &$attachments, bool $forceAttachment): void
+    {
+        $contentType = $headers['content-type'] ?? 'text/plain';
+        $disposition = $headers['content-disposition'] ?? '';
+        $filename = $this->MimeParameter($disposition, 'filename');
+        if ($filename === '') {
+            $filename = $this->MimeParameter($contentType, 'name');
+        }
+        $isAttachment = $forceAttachment || $filename !== '' || stripos($disposition, 'attachment') !== false;
+        if (preg_match('/boundary\s*=\s*(?:"([^"]+)"|([^;\s]+))/i', $contentType, $boundaryMatch)) {
+            $boundary = $boundaryMatch[1] !== '' ? $boundaryMatch[1] : $boundaryMatch[2];
+            $delimiter = '--' . $boundary;
+            $chunks = explode($delimiter, $body);
+            foreach ($chunks as $index => $chunk) {
+                if ($index === 0 || str_starts_with(ltrim($chunk), '--')) {
+                    continue;
+                }
+                $chunk = preg_replace('/^\r?\n/', '', $chunk);
+                $chunk = preg_replace('/\r?\n$/', '', $chunk);
+                $sub = preg_split("/\r?\n\r?\n/", $chunk, 2);
+                if (count($sub) !== 2) {
+                    continue;
+                }
+                $subHeaders = $this->ParseHeaders($sub[0]);
+                $this->ParseMimePart($subHeaders, $sub[1], $attachments, false);
             }
             return;
         }
+        if ($filename !== '' || stripos($disposition, 'attachment') !== false) {
+            $encoding = strtolower(trim($headers['content-transfer-encoding'] ?? ''));
+            if ($encoding === 'base64') {
+                $decoded = base64_decode(preg_replace('/\s+/', '', $body), true);
+                $body = $decoded === false ? '' : $decoded;
+            } elseif ($encoding === 'quoted-printable') {
+                $body = quoted_printable_decode($body);
+            }
+            if ($filename === '') {
+                $filename = 'attachment.bin';
+            }
+            $attachments[] = ['name' => $this->DecodeMimeText($filename), 'data' => $body];
+        }
+    }
 
-        if (!empty($part->parts) && is_array($part->parts)) {
-            foreach ($part->parts as $index => $subPart) {
-                $subNumber = $partNumber === '' ? (string)($index + 1) : $partNumber . '.' . ($index + 1);
-                $this->CollectAttachments($connection, $uid, $subPart, $subNumber, $attachments);
+    private function ParseHeaders(string $headerText): array
+    {
+        $headers = [];
+        $unfolded = preg_replace("/\r?\n[ \t]+/", ' ', $headerText);
+        foreach (preg_split("/\r?\n/", (string)$unfolded) as $line) {
+            $colon = strpos($line, ':');
+            if ($colon !== false) {
+                $headers[strtolower(trim(substr($line, 0, $colon)))] = trim(substr($line, $colon + 1));
             }
         }
+        return $headers;
+    }
+
+    private function MimeParameter(string $header, string $parameter): string
+    {
+        $quoted = preg_quote($parameter, '/');
+        if (preg_match('/(?:^|;)\s*' . $quoted . '\s*=\s*"((?:[^"\\\\]|\\\\.)*)"/i', $header, $matches)) {
+            return stripcslashes($matches[1]);
+        }
+        if (preg_match('/(?:^|;)\s*' . $quoted . '\s*=\s*([^;\s]+)/i', $header, $matches)) {
+            return trim($matches[1]);
+        }
+        return '';
     }
 
     private function ExtractSender(string $from): string
@@ -200,23 +357,25 @@ class MailImportAttachment extends IPSModule
 
     private function DecodeMimeText(string $value): string
     {
-        $decoded = @imap_mime_header_decode($value);
-        if (!is_array($decoded)) {
+        if (!function_exists('iconv_mime_decode')) {
             return $value;
         }
-        $result = '';
-        foreach ($decoded as $piece) {
-            $charset = $piece->charset ?? 'UTF-8';
-            $text = (string)($piece->text ?? '');
-            if ($charset !== 'default' && strtoupper($charset) !== 'UTF-8' && function_exists('iconv')) {
-                $converted = @iconv($charset, 'UTF-8//IGNORE', $text);
-                if ($converted !== false) {
-                    $text = $converted;
-                }
-            }
-            $result .= $text;
+        $decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+        return $decoded === false ? $value : $decoded;
+    }
+
+    private function ResolveTargetDirectory(string $directory): string
+    {
+        if ($directory === '') {
+            return '';
         }
-        return $result;
+        $isAbsolute = str_starts_with($directory, '/')
+            || preg_match('/^[A-Za-z]:[\\\\\/]/', $directory) === 1
+            || str_starts_with($directory, '\\\\');
+        if (!$isAbsolute) {
+            $directory = rtrim(IPS_GetKernelDir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . ltrim($directory, '/\\');
+        }
+        return rtrim($directory, DIRECTORY_SEPARATOR);
     }
 
     private function SafeFilename(string $filename): string
@@ -236,20 +395,29 @@ class MailImportAttachment extends IPSModule
             return $candidate;
         }
         $suffix = date('Ymd_His');
-        $candidate = $directory . DIRECTORY_SEPARATOR . $stem . '_' . $suffix .
-            ($extension !== '' ? '.' . $extension : '');
+        $candidate = $directory . DIRECTORY_SEPARATOR . $stem . '_' . $suffix . ($extension !== '' ? '.' . $extension : '');
         $counter = 1;
         while (file_exists($candidate)) {
-            $candidate = $directory . DIRECTORY_SEPARATOR . $stem . '_' . $suffix . '_' . $counter .
-                ($extension !== '' ? '.' . $extension : '');
+            $candidate = $directory . DIRECTORY_SEPARATOR . $stem . '_' . $suffix . '_' . $counter . ($extension !== '' ? '.' . $extension : '');
             $counter++;
         }
         return $candidate;
     }
 
+    private function UpdateRunCounters(int $processed, int $savedCount, int $errors, bool $setTime): void
+    {
+        $this->SetValue('ProcessedCount', $processed);
+        $this->SetValue('SavedCount', $savedCount);
+        $this->SetValue('ErrorCount', $errors);
+        if ($setTime) {
+            $this->SetValue('LastCheck', date('d.m.Y H:i:s'));
+        }
+    }
+
     private function SetStatusText(string $status): void
     {
         $this->WriteAttributeString('LastStatus', $status);
+        $this->SetValue('Status', $status);
         $this->UpdateFormField('Status', 'caption', $status);
         $this->SendDebug('Status', $status, 0);
     }
